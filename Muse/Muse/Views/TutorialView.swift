@@ -81,8 +81,7 @@ private struct TutorialSessionView: View {
 
     private func stepView(_ step: TutorialStep) -> some View {
         VStack(spacing: 12) {
-            FaceZoneOverlay(zone: step.zone)
-                .frame(maxHeight: 230)
+            faceVisual(for: step)
                 .padding(.top, 10)
 
             ScrollView {
@@ -112,6 +111,42 @@ private struct TutorialSessionView: View {
             .padding(.bottom, 16)
         }
         .animation(.spring(duration: 0.35), value: viewModel.stepIndex)
+    }
+
+    /// Live mirrored camera with the zone painted in the look's color, on a real
+    /// device; the stylized diagram is the simulator / no-camera fallback.
+    @ViewBuilder
+    private func faceVisual(for step: TutorialStep) -> some View {
+        if LiveTutorialFaceView.isSupported {
+            LiveTutorialFaceView(zone: step.zone, tint: tintColor(for: viewModel.stepIndex))
+                .frame(height: 360)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(MuseTheme.cream.opacity(0.1), lineWidth: 1)
+                )
+                .overlay(alignment: .topLeading) {
+                    Text(step.zone.displayName)
+                        .font(MuseTheme.bodyFont(12, weight: .semibold))
+                        .foregroundStyle(MuseTheme.background)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(tintColor(for: viewModel.stepIndex)))
+                        .padding(12)
+                }
+                .padding(.horizontal, 20)
+        } else {
+            FaceZoneOverlay(zone: step.zone)
+                .frame(maxHeight: 230)
+        }
+    }
+
+    /// Tie the overlay color to the look's palette so it reads as the actual
+    /// product (e.g. gold lids for a golden look), varying per step.
+    private func tintColor(for index: Int) -> Color {
+        let palette = viewModel.look.paletteHex
+        guard !palette.isEmpty else { return MuseTheme.accent }
+        return Color(hex: palette[index % palette.count])
     }
 
     private var finishView: some View {
