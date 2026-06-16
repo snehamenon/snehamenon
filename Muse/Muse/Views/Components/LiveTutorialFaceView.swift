@@ -233,13 +233,9 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
         let currentStyle = style
         let viewBounds = bounds
         let paths: [CGPath?] = currentDescriptors.map { descriptor in
-            Self.overlayPath(
-                zone: descriptor.zone,
-                landmarks: landmarks,
-                boundingBox: face.boundingBox,
-                bufW: bufW, bufH: bufH,
-                viewBounds: viewBounds
-            )
+            Self.zonePath(zone: descriptor.zone, landmarks: landmarks, boundingBox: face.boundingBox) { point in
+                Self.mapPoint(point, bufW: bufW, bufH: bufH, viewBounds: viewBounds)
+            }
         }
 
         DispatchQueue.main.async { [weak self] in
@@ -279,19 +275,22 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
 
     // MARK: Zone geometry
 
-    private static func overlayPath(
+    /// Shared face-zone geometry. `map` converts an image-normalized (y-up, 0–1)
+    /// point into the target space — view space for the coaching overlay, or
+    /// buffer-pixel space for the makeup filter — so both renderers agree on
+    /// where each zone sits.
+    static func zonePath(
         zone: FaceZone,
         landmarks: VNFaceLandmarks2D,
         boundingBox: CGRect,
-        bufW: CGFloat, bufH: CGFloat,
-        viewBounds: CGRect
+        map: (CGPoint) -> CGPoint
     ) -> CGPath? {
         func pts(_ region: VNFaceLandmarkRegion2D?) -> [CGPoint] {
             guard let region else { return [] }
             return region.normalizedPoints.map { np in
                 let imageX = boundingBox.minX + CGFloat(np.x) * boundingBox.width
                 let imageY = boundingBox.minY + CGFloat(np.y) * boundingBox.height
-                return mapPoint(CGPoint(x: imageX, y: imageY), bufW: bufW, bufH: bufH, viewBounds: viewBounds)
+                return map(CGPoint(x: imageX, y: imageY))
             }
         }
         func bbox(_ points: [CGPoint]) -> CGRect? {

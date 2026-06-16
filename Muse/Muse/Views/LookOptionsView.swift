@@ -14,7 +14,7 @@ struct LookOptionsView: View {
             case .failed(let message):
                 failureView(message)
             case .loaded:
-                if LiveTutorialFaceView.isSupported {
+                if MakeupPreviewView.isSupported {
                     liveSelector
                 } else {
                     cardsView
@@ -39,7 +39,7 @@ struct LookOptionsView: View {
     private var liveSelector: some View {
         let look = app.looks[safeIndex]
         return ZStack {
-            LiveTutorialFaceView(zones: Self.previewZones(for: look), style: .preview)
+            MakeupPreviewView(zones: Self.previewZones(for: look))
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
