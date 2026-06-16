@@ -118,35 +118,36 @@ private struct TutorialSessionView: View {
     @ViewBuilder
     private func faceVisual(for step: TutorialStep) -> some View {
         if LiveTutorialFaceView.isSupported {
-            LiveTutorialFaceView(zone: step.zone, tint: tintColor(for: viewModel.stepIndex))
-                .frame(height: 360)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(MuseTheme.cream.opacity(0.1), lineWidth: 1)
-                )
-                .overlay(alignment: .topLeading) {
-                    Text(step.zone.displayName)
-                        .font(MuseTheme.bodyFont(12, weight: .semibold))
-                        .foregroundStyle(MuseTheme.background)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(tintColor(for: viewModel.stepIndex)))
-                        .padding(12)
-                }
-                .padding(.horizontal, 20)
+            LiveTutorialFaceView(
+                zones: [MakeupZone(zone: step.zone, colorHex: stepColorHex(step), finish: step.makeupFinish)],
+                style: .coach
+            )
+            .frame(height: 360)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(MuseTheme.cream.opacity(0.1), lineWidth: 1)
+            )
+            .overlay(alignment: .topLeading) {
+                Text(step.zone.displayName)
+                    .font(MuseTheme.bodyFont(12, weight: .semibold))
+                    .foregroundStyle(MuseTheme.background)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color(hex: stepColorHex(step))))
+                    .padding(12)
+            }
+            .padding(.horizontal, 20)
         } else {
             FaceZoneOverlay(zone: step.zone)
                 .frame(maxHeight: 230)
         }
     }
 
-    /// Tie the overlay color to the look's palette so it reads as the actual
-    /// product (e.g. gold lids for a golden look), varying per step.
-    private func tintColor(for index: Int) -> Color {
-        let palette = viewModel.look.paletteHex
-        guard !palette.isEmpty else { return MuseTheme.accent }
-        return Color(hex: palette[index % palette.count])
+    /// The step's real product color (e.g. gold for a golden eyeshadow step),
+    /// falling back to the look's palette if a response omitted it.
+    private func stepColorHex(_ step: TutorialStep) -> String {
+        step.colorHex ?? viewModel.look.paletteHex.first ?? "#D98E5B"
     }
 
     private var finishView: some View {

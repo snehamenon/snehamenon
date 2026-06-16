@@ -32,6 +32,11 @@ enum FaceZone: String, Codable, CaseIterable {
     }
 }
 
+/// Texture of a product, used to tune how the preview blends it onto skin.
+enum MakeupFinish: String, Codable, Equatable {
+    case matte, satin, shimmer, dewy
+}
+
 struct TutorialStep: Codable, Identifiable, Equatable {
     let stepNumber: Int
     let title: String
@@ -40,8 +45,17 @@ struct TutorialStep: Codable, Identifiable, Equatable {
     let shadeGuidance: String
     let technique: String
     let proTip: String
+    /// Representative product color for this step, as #RRGGBB. Drives both the
+    /// coaching highlight tint and the look preview. Optional for resilience if
+    /// a response omits it.
+    var colorHex: String? = nil
+    var finish: String? = nil
 
     var id: Int { stepNumber }
+
+    var makeupFinish: MakeupFinish {
+        finish.flatMap { MakeupFinish(rawValue: $0.lowercased()) } ?? .satin
+    }
 }
 
 struct Look: Codable, Identifiable, Equatable {

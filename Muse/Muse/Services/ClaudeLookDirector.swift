@@ -142,6 +142,13 @@ struct ClaudeLookDirector: LookDirector {
             "previews the look's tones, why_suited tied to THIS person's specific features, and weather_notes " +
             "tied to the conditions above. palette_hex values must be #RRGGBB strings."
         )
+        lines.append(
+            "For every step, also set color_hex to the actual product color applied in that step as a " +
+            "#RRGGBB string (the real color the user would see on that zone — e.g. the lipstick color on " +
+            "lips, the eyeshadow color on eyelids, the blush on cheeks), and finish to one of matte, satin, " +
+            "shimmer, or dewy. These power a live preview that paints the look on the user's face, so make " +
+            "color_hex realistic for the zone."
+        )
         return lines.joined(separator: "\n")
     }
 
@@ -161,8 +168,13 @@ struct ClaudeLookDirector: LookDirector {
                 "shade_guidance": ["type": "string"],
                 "technique": ["type": "string"],
                 "pro_tip": ["type": "string"],
+                "color_hex": ["type": "string"],
+                "finish": [
+                    "type": "string",
+                    "enum": ["matte", "satin", "shimmer", "dewy"],
+                ],
             ],
-            "required": ["step_number", "title", "zone", "product", "shade_guidance", "technique", "pro_tip"],
+            "required": ["step_number", "title", "zone", "product", "shade_guidance", "technique", "pro_tip", "color_hex", "finish"],
             "additionalProperties": false,
         ]
         let lookSchema: [String: Any] = [

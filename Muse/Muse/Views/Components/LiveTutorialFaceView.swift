@@ -2,16 +2,29 @@ import SwiftUI
 import AVFoundation
 import Vision
 
-/// The headline tutorial feature: shows the user's live (mirrored) face and
-/// paints a translucent, color-tinted overlay on the exact zone the current
-/// step applies to — gold on the eyelids for golden eyeshadow, etc. Tracks the
-/// face per-frame with Vision landmarks so the overlay stays glued as they move.
-///
-/// Works on any device with a front camera. On the simulator (no camera),
-/// `isSupported` is false and the caller falls back to the stylized diagram.
-struct LiveTutorialFaceView: UIViewRepresentable {
+/// One painted region of a look: which face zone, what color, what finish.
+struct MakeupZone: Equatable {
     let zone: FaceZone
-    let tint: Color
+    let colorHex: String
+    let finish: MakeupFinish
+}
+
+/// How the overlay renders:
+/// - `.coach` — one zone, bright fill + outline that clearly points to WHERE
+///   (used during the step-by-step tutorial).
+/// - `.preview` — a whole look painted as soft, blended makeup so the user can
+///   see themselves in it and choose (used on the look-selection screen).
+enum FaceOverlayStyle {
+    case coach
+    case preview
+}
+
+/// Live, mirrored front-camera view that tracks the face with Vision landmarks
+/// and paints makeup zones on it. Works on any device with a front camera;
+/// `isSupported` is false on the simulator so callers can fall back.
+struct LiveTutorialFaceView: UIViewRepresentable {
+    let zones: [MakeupZone]
+    let style: FaceOverlayStyle
 
     static var isSupported: Bool {
         AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) != nil
@@ -20,13 +33,13 @@ struct LiveTutorialFaceView: UIViewRepresentable {
     func makeUIView(context: Context) -> LiveFacePreviewView {
         let view = LiveFacePreviewView()
         view.configure()
-        view.update(zone: zone, tint: UIColor(tint))
+        view.update(zones: zones, style: style)
         view.start()
         return view
     }
 
     func updateUIView(_ uiView: LiveFacePreviewView, context: Context) {
-        uiView.update(zone: zone, tint: UIColor(tint))
+        uiView.update(zones: zones, style: style)
     }
 
     static func dismantleUIView(_ uiView: LiveFacePreviewView, coordinator: ()) {
@@ -34,22 +47,25 @@ struct LiveTutorialFaceView: UIViewRepresentable {
     }
 }
 
-/// Owns the front-camera session, the preview layer, and the overlay shape
-/// layer. Per frame: detect face landmarks, build the zone path in view space,
-/// and redraw the overlay.
 final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private struct ZoneDescriptor {
+        let zone: FaceZone
+        let color: UIColor
+        let finish: MakeupFinish
+    }
+
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "com.snehamenon.muse.tutorialcam")
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
-    private let overlayLayer = CAShapeLayer()
 
-    private var zone: FaceZone = .fullFace
-    private var tint: UIColor = .systemOrange
+    private var makeupLayers: [CAShapeLayer] = []
+    private var descriptors: [ZoneDescriptor] = []
+    private var style: FaceOverlayStyle = .coach
     private var frameCounter = 0
 
-    // MARK: Lifecycle
+    // MARK: Camera setup
 
     func configure() {
         backgroundColor = UIColor(MuseTheme.surface)
@@ -76,9 +92,8 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
         layer.addSublayer(preview)
         previewLayer = preview
 
-        // Let iOS compute the correct upright angle for this device's front camera,
-        // and apply the SAME angle to both the preview and the analyzed buffer (so
-        // the overlay lines up with what's on screen). Mirror both for a selfie feel.
+        // Let iOS pick the correct upright angle for this device's front camera,
+        // applied identically to preview and analyzed buffer; mirror both.
         if let device = captureDevice {
             let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: preview)
             rotationCoordinator = coordinator
@@ -93,12 +108,6 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
                 }
             }
         }
-
-        overlayLayer.fillColor = UIColor.systemOrange.withAlphaComponent(0.3).cgColor
-        overlayLayer.strokeColor = UIColor.systemOrange.withAlphaComponent(0.9).cgColor
-        overlayLayer.lineWidth = 2
-        overlayLayer.lineJoin = .round
-        layer.addSublayer(overlayLayer)
     }
 
     func start() {
@@ -113,17 +122,85 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
         }
     }
 
-    func update(zone: FaceZone, tint: UIColor) {
-        self.zone = zone
-        self.tint = tint
-        overlayLayer.fillColor = tint.withAlphaComponent(0.32).cgColor
-        overlayLayer.strokeColor = tint.withAlphaComponent(0.95).cgColor
+    // MARK: Zone configuration
+
+    func update(zones newZones: [MakeupZone], style newStyle: FaceOverlayStyle) {
+        style = newStyle
+        descriptors = newZones.map {
+            ZoneDescriptor(zone: $0.zone, color: UIColor(Color(hex: $0.colorHex)), finish: $0.finish)
+        }
+
+        // Grow/shrink the layer pool to match the number of zones.
+        while makeupLayers.count < descriptors.count {
+            let shape = CAShapeLayer()
+            shape.actions = ["path": NSNull(), "shadowPath": NSNull(), "fillColor": NSNull(), "opacity": NSNull()]
+            layer.addSublayer(shape)
+            makeupLayers.append(shape)
+        }
+        while makeupLayers.count > descriptors.count {
+            makeupLayers.removeLast().removeFromSuperlayer()
+        }
+        for (index, descriptor) in descriptors.enumerated() {
+            styleLayer(makeupLayers[index], descriptor: descriptor, style: newStyle)
+        }
+    }
+
+    private func styleLayer(_ shape: CAShapeLayer, descriptor: ZoneDescriptor, style: FaceOverlayStyle) {
+        shape.frame = bounds
+        shape.masksToBounds = false
+        switch style {
+        case .coach:
+            shape.fillColor = descriptor.color.withAlphaComponent(0.32).cgColor
+            shape.strokeColor = descriptor.color.withAlphaComponent(0.95).cgColor
+            shape.lineWidth = 2
+            shape.lineJoin = .round
+            shape.compositingFilter = nil
+            shape.shadowOpacity = 0
+        case .preview:
+            let params = Self.previewParams(zone: descriptor.zone, finish: descriptor.finish)
+            shape.fillColor = descriptor.color.withAlphaComponent(params.alpha).cgColor
+            shape.strokeColor = UIColor.clear.cgColor
+            shape.lineWidth = 0
+            shape.compositingFilter = params.blend
+            // Feather the edges with a same-color blurred shadow so it reads like
+            // applied makeup rather than a flat sticker.
+            shape.shadowColor = descriptor.color.cgColor
+            shape.shadowOpacity = 0.85
+            shape.shadowRadius = params.feather
+            shape.shadowOffset = .zero
+        }
+    }
+
+    /// Per-zone / per-finish opacity, blend mode, and edge feather for the
+    /// blended preview. Tuned conservatively; easy to adjust on-device.
+    private static func previewParams(zone: FaceZone, finish: MakeupFinish) -> (alpha: CGFloat, blend: String, feather: CGFloat) {
+        var alpha: CGFloat
+        var blend: String
+        switch finish {
+        case .matte: alpha = 0.45; blend = "multiplyBlendMode"
+        case .satin: alpha = 0.40; blend = "softLightBlendMode"
+        case .dewy: alpha = 0.34; blend = "softLightBlendMode"
+        case .shimmer: alpha = 0.40; blend = "screenBlendMode"
+        }
+        var feather: CGFloat = 8
+        switch zone {
+        case .lips: alpha *= 1.3; feather = 4
+        case .eyelids: feather = 7
+        case .lashLine: alpha *= 0.9; feather = 4
+        case .cheeks: alpha *= 0.55; feather = 20
+        case .cheekbones: alpha *= 0.55; feather = 18
+        case .brows: alpha *= 0.8; blend = "multiplyBlendMode"; feather = 4
+        case .underEye: alpha *= 0.5; feather = 10
+        case .nose, .forehead, .jawline: alpha *= 0.5; feather = 16
+        case .fullFace: alpha *= 0.3; feather = 24
+        }
+        return (min(max(alpha, 0.08), 0.7), blend, feather)
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         previewLayer?.frame = bounds
-        overlayLayer.frame = bounds
+        makeupLayers.forEach { $0.frame = bounds }
     }
 
     // MARK: Per-frame detection
@@ -146,23 +223,36 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
         try? handler.perform([request])
 
         guard let face = request.results?.first, let landmarks = face.landmarks else {
-            DispatchQueue.main.async { [weak self] in self?.overlayLayer.path = nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.makeupLayers.forEach { $0.path = nil }
+            }
             return
         }
 
-        let currentZone = zone
-        // Snapshot the bounds on main isn't needed here; bounds is read-only and
-        // stable enough between layout passes for mapping.
+        let currentDescriptors = descriptors
+        let currentStyle = style
         let viewBounds = bounds
-        let path = Self.overlayPath(
-            zone: currentZone,
-            landmarks: landmarks,
-            boundingBox: face.boundingBox,
-            bufW: bufW, bufH: bufH,
-            viewBounds: viewBounds
-        )
+        let paths: [CGPath?] = currentDescriptors.map { descriptor in
+            Self.overlayPath(
+                zone: descriptor.zone,
+                landmarks: landmarks,
+                boundingBox: face.boundingBox,
+                bufW: bufW, bufH: bufH,
+                viewBounds: viewBounds
+            )
+        }
+
         DispatchQueue.main.async { [weak self] in
-            self?.overlayLayer.path = path
+            guard let self else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            for (index, shape) in self.makeupLayers.enumerated() where index < paths.count {
+                shape.path = paths[index]
+                if currentStyle == .preview {
+                    shape.shadowPath = paths[index]
+                }
+            }
+            CATransaction.commit()
         }
     }
 
@@ -196,7 +286,6 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
         bufW: CGFloat, bufH: CGFloat,
         viewBounds: CGRect
     ) -> CGPath? {
-        // Convert a landmark region to view-space points.
         func pts(_ region: VNFaceLandmarkRegion2D?) -> [CGPoint] {
             guard let region else { return [] }
             return region.normalizedPoints.map { np in
@@ -275,21 +364,17 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
             let faceCenterX = (l.midX + r.midX) / 2
             let eyeSpan = max(abs(l.midX - r.midX), 1)
             let radius = max(eyeSpan * 0.30, 18)
-            // Anchor vertically to the nose, which sits well below the eyes — this
-            // is what keeps the cheek overlays off the eyes.
             let noseBox = bbox(nose)
             let noseTopY = noseBox?.minY ?? ((l.maxY + r.maxY) / 2 + radius)
             let noseBottomY = noseBox?.maxY ?? (noseTopY + eyeSpan * 0.6)
             for e in [l, r] {
                 let outward: CGFloat = e.midX < faceCenterX ? -1 : 1
                 if zone == .cheeks {
-                    // Apple of the cheek: below the pupil, around nostril height.
                     addEllipse(
                         center: CGPoint(x: e.midX + outward * radius * 0.2, y: noseBottomY),
                         width: radius * 2.0, height: radius * 1.7
                     )
                 } else {
-                    // Cheekbone: mid-nose height, pushed toward the ear, swept diagonally.
                     addEllipse(
                         center: CGPoint(x: e.midX + outward * radius * 1.05, y: (noseTopY + noseBottomY) / 2),
                         width: radius * 2.3, height: radius * 1.25,
@@ -314,9 +399,8 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
 
         case .jawline:
             if let c = bbox(contour), !contour.isEmpty {
-                // Highlight the lower face outline: a few markers along the jaw.
                 let lower = contour.filter { $0.y > c.midY }
-                let markers = [lower.first, lower.min(by: { $0.y < $1.y }).flatMap { _ in lower.max(by: { $0.y < $1.y }) }, lower.last].compactMap { $0 }
+                let markers = [lower.first, lower.max(by: { $0.y < $1.y }), lower.last].compactMap { $0 }
                 for point in markers {
                     addEllipse(center: point, width: c.width * 0.18, height: c.width * 0.18)
                 }
