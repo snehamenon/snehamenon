@@ -221,9 +221,14 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
 
         let path = CGMutablePath()
 
-        func addEllipse(center: CGPoint, width: CGFloat, height: CGFloat) {
+        func addEllipse(center: CGPoint, width: CGFloat, height: CGFloat, rotation: CGFloat = 0) {
             guard width > 1, height > 1 else { return }
-            path.addEllipse(in: CGRect(x: center.x - width / 2, y: center.y - height / 2, width: width, height: height))
+            if rotation == 0 {
+                path.addEllipse(in: CGRect(x: center.x - width / 2, y: center.y - height / 2, width: width, height: height))
+            } else {
+                let transform = CGAffineTransform(translationX: center.x, y: center.y).rotated(by: rotation)
+                path.addEllipse(in: CGRect(x: -width / 2, y: -height / 2, width: width, height: height), transform: transform)
+            }
         }
         func addPolygon(_ points: [CGPoint]) {
             guard points.count > 2 else { return }
@@ -267,16 +272,29 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
 
         case .cheeks, .cheekbones:
             guard let l = bbox(leftEye), let r = bbox(rightEye) else { return path.isEmpty ? nil : path }
-            let eyeSpan = abs(l.midX - r.midX)
-            let radius = max(eyeSpan * 0.32, 18)
-            let noseMidY = bbox(nose)?.midY ?? ((l.maxY + r.maxY) / 2 + radius)
+            let faceCenterX = (l.midX + r.midX) / 2
+            let eyeSpan = max(abs(l.midX - r.midX), 1)
+            let radius = max(eyeSpan * 0.30, 18)
+            // Anchor vertically to the nose, which sits well below the eyes — this
+            // is what keeps the cheek overlays off the eyes.
+            let noseBox = bbox(nose)
+            let noseTopY = noseBox?.minY ?? ((l.maxY + r.maxY) / 2 + radius)
+            let noseBottomY = noseBox?.maxY ?? (noseTopY + eyeSpan * 0.6)
             for e in [l, r] {
+                let outward: CGFloat = e.midX < faceCenterX ? -1 : 1
                 if zone == .cheeks {
-                    addEllipse(center: CGPoint(x: e.midX, y: max(e.maxY + radius * 0.6, noseMidY)), width: radius * 2, height: radius * 1.7)
+                    // Apple of the cheek: below the pupil, around nostril height.
+                    addEllipse(
+                        center: CGPoint(x: e.midX + outward * radius * 0.2, y: noseBottomY),
+                        width: radius * 2.0, height: radius * 1.7
+                    )
                 } else {
-                    // Cheekbones sit higher and more lateral than the apples.
-                    let lateral = e.midX + (e.midX > (l.midX + r.midX) / 2 ? radius * 0.5 : -radius * 0.5)
-                    addEllipse(center: CGPoint(x: lateral, y: e.maxY + radius * 0.2), width: radius * 1.9, height: radius * 1.3)
+                    // Cheekbone: mid-nose height, pushed toward the ear, swept diagonally.
+                    addEllipse(
+                        center: CGPoint(x: e.midX + outward * radius * 1.05, y: (noseTopY + noseBottomY) / 2),
+                        width: radius * 2.3, height: radius * 1.25,
+                        rotation: outward * -0.3
+                    )
                 }
             }
 
