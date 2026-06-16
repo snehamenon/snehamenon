@@ -42,6 +42,7 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
     private let output = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "com.snehamenon.muse.tutorialcam")
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private let overlayLayer = CAShapeLayer()
 
     private var zone: FaceZone = .fullFace
@@ -55,35 +56,43 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
 
         session.beginConfiguration()
         session.sessionPreset = .high
+
+        var captureDevice: AVCaptureDevice?
         if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
            let input = try? AVCaptureDeviceInput(device: device),
            session.canAddInput(input) {
             session.addInput(input)
+            captureDevice = device
         }
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: sessionQueue)
         if session.canAddOutput(output) {
             session.addOutput(output)
         }
-        // Deliver portrait, mirrored frames so the buffer Vision analyzes matches
-        // the mirrored preview the user sees — overlay coordinates then line up.
-        if let connection = output.connection(with: .video) {
-            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
-            if connection.isVideoMirroringSupported { connection.isVideoMirrored = true }
-        }
         session.commitConfiguration()
 
         let preview = AVCaptureVideoPreviewLayer(session: session)
         preview.videoGravity = .resizeAspectFill
-        if let connection = preview.connection {
-            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
-            if connection.isVideoMirroringSupported {
-                connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = true
-            }
-        }
         layer.addSublayer(preview)
         previewLayer = preview
+
+        // Let iOS compute the correct upright angle for this device's front camera,
+        // and apply the SAME angle to both the preview and the analyzed buffer (so
+        // the overlay lines up with what's on screen). Mirror both for a selfie feel.
+        if let device = captureDevice {
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: preview)
+            rotationCoordinator = coordinator
+            let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+            for connection in [preview.connection, output.connection(with: .video)].compactMap({ $0 }) {
+                if connection.isVideoRotationAngleSupported(angle) {
+                    connection.videoRotationAngle = angle
+                }
+                if connection.isVideoMirroringSupported {
+                    connection.automaticallyAdjustsVideoMirroring = false
+                    connection.isVideoMirrored = true
+                }
+            }
+        }
 
         overlayLayer.fillColor = UIColor.systemOrange.withAlphaComponent(0.3).cgColor
         overlayLayer.strokeColor = UIColor.systemOrange.withAlphaComponent(0.9).cgColor
