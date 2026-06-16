@@ -135,17 +135,14 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         let face = request.results?.first
 
         let camera = CIImage(cvPixelBuffer: buffer)
-        // Work at reduced resolution for performance; the layer scales up.
-        let scale = min(1, 720 / bufW)
-        let procW = bufW * scale
-        let procH = bufH * scale
-        let extent = CGRect(x: 0, y: 0, width: procW, height: procH)
-        let scaled = camera.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let extent = camera.extent
 
-        var base = smoothed(scaled, extent: extent, procW: procW)
-
+        // Smoothing and makeup are low-frequency, so we compute them at reduced
+        // resolution and composite onto the FULL-res camera image — the picture
+        // stays sharp while the heavy work stays cheap.
+        var base = smoothed(camera, extent: extent)
         if let face, let landmarks = face.landmarks, !paints.isEmpty {
-            base = applyMakeup(on: base, landmarks: landmarks, boundingBox: face.boundingBox, procW: procW, procH: procH, extent: extent)
+            base = applyMakeup(on: base, landmarks: landmarks, boundingBox: face.boundingBox, bufW: bufW, bufH: bufH, extent: extent)
         }
 
         let final = base.cropped(to: extent)
@@ -157,21 +154,26 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
 
     // MARK: Skin smoothing
 
-    private func smoothed(_ image: CIImage, extent: CGRect, procW: CGFloat) -> CIImage {
-        let blurred = image.clampedToExtent()
-            .applyingGaussianBlur(sigma: Double(procW * 0.012))
+    private func smoothed(_ image: CIImage, extent: CGRect) -> CIImage {
+        // Compute the blur at ~1/3 resolution (it's low-frequency, so this looks
+        // identical and is ~9x cheaper), then blend it back lightly so skin is
+        // softened — not blurred — and detail is preserved.
+        let blurScale: CGFloat = 0.3
+        let blurredUp = image
+            .transformed(by: CGAffineTransform(scaleX: blurScale, y: blurScale))
+            .clampedToExtent()
+            .applyingGaussianBlur(sigma: 3.0)
+            .transformed(by: CGAffineTransform(scaleX: 1 / blurScale, y: 1 / blurScale))
             .cropped(to: extent)
-        // Blend the blurred copy over the sharp one at partial strength so skin
-        // softens but features keep some definition.
-        let faded = blurred.applyingFilter("CIColorMatrix", parameters: [
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.55)
+        let faded = blurredUp.applyingFilter("CIColorMatrix", parameters: [
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.3)
         ])
         let softened = faded.applyingFilter("CISourceOverCompositing", parameters: [
             kCIInputBackgroundImageKey: image
         ])
         return softened.applyingFilter("CIColorControls", parameters: [
-            kCIInputBrightnessKey: 0.02,
-            kCIInputSaturationKey: 1.04,
+            kCIInputBrightnessKey: 0.015,
+            kCIInputSaturationKey: 1.03,
             kCIInputContrastKey: 1.0
         ])
     }
@@ -182,15 +184,20 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         on base: CIImage,
         landmarks: VNFaceLandmarks2D,
         boundingBox: CGRect,
-        procW: CGFloat, procH: CGFloat,
+        bufW: CGFloat, bufH: CGFloat,
         extent: CGRect
     ) -> CIImage {
-        // Map an image-normalized (y-up) landmark point to processing-buffer
-        // pixels (y-down, matching the Core Graphics context we paint into).
-        let map: (CGPoint) -> CGPoint = { CGPoint(x: $0.x * procW, y: (1 - $0.y) * procH) }
+        // Rasterize the makeup masks at half resolution (they're feathered, so
+        // it's invisible) and upscale — cheap, and keeps the camera sharp.
+        let maskScale: CGFloat = 0.5
+        let maskW = bufW * maskScale
+        let maskH = bufH * maskScale
+        // Map an image-normalized (y-up) landmark point to mask pixels (y-down,
+        // matching the Core Graphics context).
+        let map: (CGPoint) -> CGPoint = { CGPoint(x: $0.x * maskW, y: (1 - $0.y) * maskH) }
 
-        let colorImage = drawGroup(extent: extent, procW: procW, procH: procH, landmarks: landmarks, boundingBox: boundingBox, map: map) { Self.colorZones.contains($0) }
-        let diffuseImage = drawGroup(extent: extent, procW: procW, procH: procH, landmarks: landmarks, boundingBox: boundingBox, map: map) { !Self.colorZones.contains($0) }
+        let colorImage = drawGroup(maskW: maskW, maskH: maskH, maskScale: maskScale, extent: extent, landmarks: landmarks, boundingBox: boundingBox, map: map) { Self.colorZones.contains($0) }
+        let diffuseImage = drawGroup(maskW: maskW, maskH: maskH, maskScale: maskScale, extent: extent, landmarks: landmarks, boundingBox: boundingBox, map: map) { !Self.colorZones.contains($0) }
 
         var result = base
         if let colorImage {
@@ -202,10 +209,11 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         return result
     }
 
-    /// Paints the included zones into one feathered color layer.
+    /// Paints the included zones into one feathered color layer at mask
+    /// resolution, then upscales it to the full image extent.
     private func drawGroup(
+        maskW: CGFloat, maskH: CGFloat, maskScale: CGFloat,
         extent: CGRect,
-        procW: CGFloat, procH: CGFloat,
         landmarks: VNFaceLandmarks2D,
         boundingBox: CGRect,
         map: (CGPoint) -> CGPoint,
@@ -217,7 +225,7 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         let format = UIGraphicsImageRendererFormat.default()
         format.opaque = false
         format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: procW, height: procH), format: format)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: maskW, height: maskH), format: format)
         let painted = renderer.image { ctx in
             let cg = ctx.cgContext
             for paint in group {
@@ -230,10 +238,11 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
             }
         }
         guard let cgImage = painted.cgImage else { return nil }
-        // Feather the edges so the makeup melts into the skin.
+        // Feather the edges, then upscale to full resolution.
         return CIImage(cgImage: cgImage)
             .clampedToExtent()
-            .applyingGaussianBlur(sigma: Double(procW * 0.018))
+            .applyingGaussianBlur(sigma: Double(maskW * 0.025))
+            .transformed(by: CGAffineTransform(scaleX: 1 / maskScale, y: 1 / maskScale))
             .cropped(to: extent)
     }
 
