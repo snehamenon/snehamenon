@@ -70,7 +70,7 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
 
     func configure() {
         session.beginConfiguration()
-        session.sessionPreset = .hd1280x720
+        session.sessionPreset = .hd1920x1080
 
         var device: AVCaptureDevice?
         if let found = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
@@ -166,7 +166,7 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
             .transformed(by: CGAffineTransform(scaleX: 1 / blurScale, y: 1 / blurScale))
             .cropped(to: extent)
         let faded = blurredUp.applyingFilter("CIColorMatrix", parameters: [
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.3)
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.2)
         ])
         let softened = faded.applyingFilter("CISourceOverCompositing", parameters: [
             kCIInputBackgroundImageKey: image
@@ -249,21 +249,21 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
     private static func previewAlpha(zone: FaceZone, finish: MakeupFinish) -> CGFloat {
         var alpha: CGFloat
         switch finish {
-        case .matte: alpha = 0.55
-        case .satin: alpha = 0.50
-        case .dewy: alpha = 0.42
-        case .shimmer: alpha = 0.48
+        case .matte: alpha = 0.80
+        case .satin: alpha = 0.72
+        case .dewy: alpha = 0.60
+        case .shimmer: alpha = 0.68
         }
         switch zone {
-        case .lips: break
-        case .eyelids: alpha *= 0.9
-        case .lashLine: alpha *= 0.8
+        case .lips: break               // full strength — lips read most pigmented
+        case .eyelids: alpha *= 0.95
+        case .lashLine: alpha *= 0.85
         case .brows: alpha *= 0.7
-        case .cheeks, .cheekbones: alpha *= 0.8
+        case .cheeks, .cheekbones: alpha *= 0.7   // blush stays softer than color zones
         case .underEye: alpha *= 0.6
         case .nose, .forehead, .jawline: alpha *= 0.6
         case .fullFace: alpha *= 0.4
         }
-        return min(max(alpha, 0.1), 0.7)
+        return min(max(alpha, 0.1), 0.88)
     }
 }
