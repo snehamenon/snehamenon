@@ -49,7 +49,10 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
     private var frameCounter = 0
 
     /// Zones rendered as rich color (multiply); the rest blend as soft light.
-    private static let colorZones: Set<FaceZone> = [.lips, .eyelids, .lashLine, .lashes, .brows]
+    private static let colorZones: Set<FaceZone> = [.lips, .eyelids, .lashLine, .brows]
+    /// Fine detail (lashes) — painted with a much smaller feather so the
+    /// individual strokes stay crisp instead of smearing into a blob.
+    private static let fineZones: Set<FaceZone> = [.lashes]
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -196,8 +199,9 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         // matching the Core Graphics context).
         let map: (CGPoint) -> CGPoint = { CGPoint(x: $0.x * maskW, y: (1 - $0.y) * maskH) }
 
-        let colorImage = drawGroup(maskW: maskW, maskH: maskH, maskScale: maskScale, extent: extent, landmarks: landmarks, boundingBox: boundingBox, map: map) { Self.colorZones.contains($0) }
-        let diffuseImage = drawGroup(maskW: maskW, maskH: maskH, maskScale: maskScale, extent: extent, landmarks: landmarks, boundingBox: boundingBox, map: map) { !Self.colorZones.contains($0) }
+        let colorImage = drawGroup(maskW: maskW, maskH: maskH, maskScale: maskScale, extent: extent, landmarks: landmarks, boundingBox: boundingBox, map: map, featherFactor: 0.025) { Self.colorZones.contains($0) }
+        let diffuseImage = drawGroup(maskW: maskW, maskH: maskH, maskScale: maskScale, extent: extent, landmarks: landmarks, boundingBox: boundingBox, map: map, featherFactor: 0.025) { !Self.colorZones.contains($0) && !Self.fineZones.contains($0) }
+        let lashImage = drawGroup(maskW: maskW, maskH: maskH, maskScale: maskScale, extent: extent, landmarks: landmarks, boundingBox: boundingBox, map: map, featherFactor: 0.006) { Self.fineZones.contains($0) }
 
         var result = base
         if let colorImage {
@@ -205,6 +209,9 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         }
         if let diffuseImage {
             result = diffuseImage.applyingFilter("CISoftLightBlendMode", parameters: [kCIInputBackgroundImageKey: result])
+        }
+        if let lashImage {
+            result = lashImage.applyingFilter("CIMultiplyBlendMode", parameters: [kCIInputBackgroundImageKey: result])
         }
         return result
     }
@@ -217,6 +224,7 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         landmarks: VNFaceLandmarks2D,
         boundingBox: CGRect,
         map: (CGPoint) -> CGPoint,
+        featherFactor: CGFloat,
         include: (FaceZone) -> Bool
     ) -> CIImage? {
         let group = paints.filter { include($0.zone) }
@@ -241,7 +249,7 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         // Feather the edges, then upscale to full resolution.
         return CIImage(cgImage: cgImage)
             .clampedToExtent()
-            .applyingGaussianBlur(sigma: Double(maskW * 0.025))
+            .applyingGaussianBlur(sigma: Double(maskW * featherFactor))
             .transformed(by: CGAffineTransform(scaleX: 1 / maskScale, y: 1 / maskScale))
             .cropped(to: extent)
     }

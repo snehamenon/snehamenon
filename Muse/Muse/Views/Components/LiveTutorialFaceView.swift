@@ -353,11 +353,42 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
             }
 
         case .lashes:
+            // Draw individual lash slivers fanning up and outward from the upper
+            // lid, longer toward the outer corner — reads as a mascara fan.
+            let eyeCenters = [bbox(leftEye)?.midX, bbox(rightEye)?.midX].compactMap { $0 }
+            let faceCenterX = eyeCenters.isEmpty ? 0 : eyeCenters.reduce(0, +) / CGFloat(eyeCenters.count)
             for eye in [leftEye, rightEye] {
-                if let e = bbox(eye) {
-                    // Just above the upper lash line, fanned a touch wider/taller
-                    // than the liner to read as full lashes.
-                    addEllipse(center: CGPoint(x: e.midX, y: e.minY - e.height * 0.1), width: e.width * 1.25, height: max(e.height * 0.7, 6))
+                guard let e = bbox(eye), e.width > 1, e.height > 1, eye.count >= 4 else { continue }
+                let outward: CGFloat = e.midX < faceCenterX ? -1 : 1
+                // Upper-lid points (toward the brow = smaller y in this y-down space).
+                let upper = eye.filter { $0.y <= e.midY }.sorted { $0.x < $1.x }
+                guard upper.count >= 2 else { continue }
+                // Densify with midpoints so the fan looks full regardless of how
+                // many landmarks the eye contour has.
+                var bases: [CGPoint] = []
+                for i in 0..<upper.count {
+                    bases.append(upper[i])
+                    if i < upper.count - 1 {
+                        let a = upper[i], b = upper[i + 1]
+                        bases.append(CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2))
+                        bases.append(CGPoint(x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75))
+                    }
+                }
+                for base in bases {
+                    let u = min(max((base.x - e.minX) / e.width, 0), 1)
+                    let lengthFactor = outward >= 0 ? u : (1 - u)        // longest at the outer corner
+                    let lashLen = e.height * (0.7 + 0.9 * lengthFactor)
+                    var dirX = outward * (0.15 + 0.5 * lengthFactor)
+                    var dirY: CGFloat = -1                               // up toward the brow
+                    let mag = max((dirX * dirX + dirY * dirY).squareRoot(), 0.0001)
+                    dirX /= mag; dirY /= mag
+                    let tip = CGPoint(x: base.x + dirX * lashLen, y: base.y + dirY * lashLen)
+                    let halfWidth = max(e.width * 0.012, 0.8)
+                    let perp = CGPoint(x: -dirY * halfWidth, y: dirX * halfWidth)
+                    path.move(to: CGPoint(x: base.x - perp.x, y: base.y - perp.y))
+                    path.addLine(to: CGPoint(x: base.x + perp.x, y: base.y + perp.y))
+                    path.addLine(to: tip)
+                    path.closeSubpath()
                 }
             }
 
