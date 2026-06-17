@@ -16,6 +16,10 @@ targets:
   Muse:
     type: application
     platform: iOS
+    settings:
+      base:
+        DEVELOPMENT_TEAM: "447768FX9F"
+        CODE_SIGN_STYLE: Automatic
     sources:
       - path: Muse
     info:
