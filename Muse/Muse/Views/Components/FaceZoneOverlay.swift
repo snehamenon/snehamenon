@@ -100,6 +100,11 @@ struct FaceZoneOverlay: View {
                 CGRect(x: 0.26, y: 0.415, width: 0.17, height: 0.05),
                 CGRect(x: 0.57, y: 0.415, width: 0.17, height: 0.05),
             ]
+        case .lashes:
+            return [
+                CGRect(x: 0.255, y: 0.378, width: 0.18, height: 0.05),
+                CGRect(x: 0.565, y: 0.378, width: 0.18, height: 0.05),
+            ]
         case .underEye:
             return [
                 CGRect(x: 0.26, y: 0.465, width: 0.17, height: 0.075),

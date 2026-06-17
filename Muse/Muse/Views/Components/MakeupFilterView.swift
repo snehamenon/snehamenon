@@ -49,7 +49,7 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
     private var frameCounter = 0
 
     /// Zones rendered as rich color (multiply); the rest blend as soft light.
-    private static let colorZones: Set<FaceZone> = [.lips, .eyelids, .lashLine, .brows]
+    private static let colorZones: Set<FaceZone> = [.lips, .eyelids, .lashLine, .lashes, .brows]
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -258,6 +258,7 @@ final class MakeupFilterUIView: UIView, AVCaptureVideoDataOutputSampleBufferDele
         case .lips: break               // full strength — lips read most pigmented
         case .eyelids: alpha *= 0.95
         case .lashLine: alpha *= 0.85
+        case .lashes: break               // mascara reads dark and full
         case .brows: alpha *= 0.7
         case .cheeks, .cheekbones: alpha *= 0.7   // blush stays softer than color zones
         case .underEye: alpha *= 0.6

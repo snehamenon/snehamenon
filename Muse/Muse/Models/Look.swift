@@ -8,6 +8,7 @@ enum FaceZone: String, Codable, CaseIterable {
     case brows
     case eyelids
     case lashLine = "lash_line"
+    case lashes
     case underEye = "under_eye"
     case cheeks
     case cheekbones
@@ -22,6 +23,7 @@ enum FaceZone: String, Codable, CaseIterable {
         case .brows: return "Brows"
         case .eyelids: return "Eyelids"
         case .lashLine: return "Lash line"
+        case .lashes: return "Lashes"
         case .underEye: return "Under eye"
         case .cheeks: return "Cheeks"
         case .cheekbones: return "Cheekbones"

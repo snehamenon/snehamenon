@@ -149,6 +149,10 @@ struct ClaudeLookDirector: LookDirector {
             "shimmer, or dewy. These power a live preview that paints the look on the user's face, so make " +
             "color_hex realistic for the zone."
         )
+        lines.append(
+            "Include a mascara step using the \"lashes\" zone (distinct from \"lash_line\" eyeliner) whenever " +
+            "it suits the look — its color_hex should be the mascara color, brown to black."
+        )
         return lines.joined(separator: "\n")
     }
 

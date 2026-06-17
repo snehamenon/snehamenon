@@ -187,6 +187,7 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
         case .lips: alpha *= 1.3; feather = 4
         case .eyelids: feather = 7
         case .lashLine: alpha *= 0.9; feather = 4
+        case .lashes: feather = 5
         case .cheeks: alpha *= 0.55; feather = 20
         case .cheekbones: alpha *= 0.55; feather = 18
         case .brows: alpha *= 0.8; blend = "multiplyBlendMode"; feather = 4
@@ -348,6 +349,15 @@ final class LiveFacePreviewView: UIView, AVCaptureVideoDataOutputSampleBufferDel
             for eye in [leftEye, rightEye] {
                 if let e = bbox(eye) {
                     addEllipse(center: CGPoint(x: e.midX, y: e.minY + e.height * 0.35), width: e.width * 1.1, height: max(e.height * 0.5, 5))
+                }
+            }
+
+        case .lashes:
+            for eye in [leftEye, rightEye] {
+                if let e = bbox(eye) {
+                    // Just above the upper lash line, fanned a touch wider/taller
+                    // than the liner to read as full lashes.
+                    addEllipse(center: CGPoint(x: e.midX, y: e.minY - e.height * 0.1), width: e.width * 1.25, height: max(e.height * 0.7, 6))
                 }
             }
 
